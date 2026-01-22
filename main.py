@@ -5,23 +5,23 @@ from threading import Thread
 from telegram import Update, ReplyKeyboardMarkup
 from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
 
-# --- RENDER KE LIYE ZAROORI BADLAV ---
-# Flask ka naam 'app' rakhein taaki Render ise pehchan sake
+# --- RENDER CONFIGURATION ---
+# Variable ka naam 'app' hi hona chahiye
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Bot is Online and Alive!"
+    return "Bot is Online!"
 
 def run_flask():
-    # Render dynamic port provide karta hai
+    # Render dynamic port provide karta hai, default 8080
     port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port)
 
 def keep_alive():
     t = Thread(target=run_flask)
     t.start()
-# -------------------------------------
+# -----------------------------
 
 TOKEN = '8565226350:AAF97KTjahHDUuh89N9wmedklyWUflRD6UQ'
 
@@ -78,14 +78,16 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ You are not connected. Click /search to find someone.")
 
 if __name__ == '__main__':
-    keep_alive() # Flask start karein
+    # Server start karein
+    keep_alive()
     
-    # Bot build aur run karein
+    # Bot start karein
     application = ApplicationBuilder().token(TOKEN).build()
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("search", search))
     application.add_handler(CommandHandler("stop", stop))
     application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), message_handler))
     
-    print("Bot is starting...")
+    print("Bot starting...")
     application.run_polling()
+    
