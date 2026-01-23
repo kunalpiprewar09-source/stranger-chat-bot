@@ -68,19 +68,23 @@ async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    if user_id in active_chats:
-        await context.bot.send_message(chat_id=active_chats[user_id], text=update.message.text)
-
-if __name__ == '__main__':
-    keep_alive()
+        if user_id in active_chats:
+        partner_id = active_chats[user_id]
+        await context.bot.send_message(chat_id=partner_id, text=update.message.text)
+            if __name__ == '__main__':
+    keep_alive() # Flask server start karein
+    
     application = ApplicationBuilder().token(TOKEN).build()
+    
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("search", search))
     application.add_handler(CommandHandler("stop", stop))
     application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), message_handler))
-    application.run_polling()
-    if __name__ == '__main__':
-    keep_alive() # Flask server
+    
+    print("Bot is starting on Render...")
+    
+    # Isse purane saare conflicts khatam ho jayenge
+    application.run_polling(drop_pending_updates=True)
     
     application = ApplicationBuilder().token(TOKEN).build()
     
