@@ -19,7 +19,7 @@ def keep_alive():
     t.start()
 
 # --- BOT LOGIC ---
-TOKEN = '8565226350:AAF97KTjahHDUuh89N9wmedklyWUflRD6UQ'
+TOKEN = '8565226350:AAEX2Om5xNMeuCOEqWNocUOpFGhjBWHFcck'
 
 # Database
 user_data = {} # {id: {'age': '20', 'gender': 'M', 'target': 'F', 'place': 'Delhi'}}
