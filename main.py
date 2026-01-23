@@ -23,118 +23,110 @@ TOKEN = '8565226350:AAGor5G0jaCarsylmJJcjFne9htebRLv2bk'
 user_data = {} 
 active_chats = {}
 searching_users = []
+ttt_games = {} # Tic-Tac-Toe boards
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
-# --- SETTINGS MENU ---
-async def settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [
-        [InlineKeyboardButton("👦 Gender 👧", callback_data="menu_gender")],
-        [InlineKeyboardButton("📅 Age", callback_data="menu_age")],
-        [InlineKeyboardButton("🌍 Language", callback_data="menu_lang")],
-        [InlineKeyboardButton("👥 Partner Gender", callback_data="menu_target")]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    text = "<b>Choose settings you would like to change:</b>"
+# --- TIC-TAC-TOE LOGIC ---
+def check_winner(board):
+    win_cond = [(0,1,2), (3,4,5), (6,7,8), (0,3,6), (1,4,7), (2,5,8), (0,4,8), (2,4,6)]
+    for c in win_cond:
+        if board[c[0]] == board[c[1]] == board[c[2]] != " ":
+            return board[c[0]]
+    if " " not in board: return "Draw"
+    return None
+
+async def start_ttt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if user_id not in active_chats:
+        await update.message.reply_text("❌ Pehle kisi se connect hon (/search).")
+        return
     
-    if update.message:
-        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode='HTML')
-    else:
-        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode='HTML')
+    partner_id = active_chats[user_id]
+    game_id = tuple(sorted((user_id, partner_id)))
+    ttt_games[game_id] = {"board": [" "] * 9, "turn": user_id, "X": user_id, "O": partner_id}
+    
+    await send_ttt_board(context, user_id, game_id, "Game Shuru! Aapki bari (X)")
+    await send_ttt_board(context, partner_id, game_id, "Partner ne game shuru kiya. Unki bari (X)")
+
+async def send_ttt_board(context, chat_id, game_id, text):
+    board = ttt_games[game_id]["board"]
+    kb = []
+    for i in range(0, 9, 3):
+        row = [InlineKeyboardButton(board[i+j] if board[i+j] != " " else "⬜", callback_data=f"ttt_{i+j}") for j in range(3)]
+        kb.append(row)
+    await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=InlineKeyboardMarkup(kb))
 
 # --- BUTTON HANDLER ---
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user_id = query.from_user.id
-    if user_id not in user_data: 
-        user_data[user_id] = {'gender': 'Both', 'age': 'Any', 'lang': 'Hindi', 'target': 'Both'}
-    
-    await query.answer()
     data = query.data
+    await query.answer()
 
-    if data == "menu_gender":
-        kb = [[InlineKeyboardButton("Male", callback_data="set_G_Male"), InlineKeyboardButton("Female", callback_data="set_G_Female")]]
-        await query.edit_message_text("Aapka Gender:", reply_markup=InlineKeyboardMarkup(kb))
-    elif data == "menu_target":
-        kb = [[InlineKeyboardButton("Males", callback_data="set_T_Male"), InlineKeyboardButton("Females", callback_data="set_T_Female"), InlineKeyboardButton("Both", callback_data="set_T_Both")]]
-        await query.edit_message_text("Kisse baat karni hai?", reply_markup=InlineKeyboardMarkup(kb))
-    elif data.startswith("set_"):
-        parts = data.split("_")
-        user_data[user_id][parts[1] == 'G' and 'gender' or 'target' if parts[1] != 'A' else 'age'] = parts[2]
-        await query.edit_message_text(f"✅ Saved: {parts[2]}")
-
-# --- UPGRADED SEARCH LOGIC ---
-async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if user_id in active_chats:
-        await update.message.reply_text("❌ Already in chat.")
-        return
-
-    # Default data if not set
-    if user_id not in user_data:
-        user_data[user_id] = {'gender': 'Unknown', 'target': 'Both', 'lang': 'Hindi'}
-
-    my_pref = user_data[user_id]
-
-    # Try matching with waiting users
-    for partner_id in searching_users[:]:
-        if partner_id == user_id: continue
+    if data.startswith("ttt_"):
+        partner_id = active_chats.get(user_id)
+        if not partner_id: return
+        game_id = tuple(sorted((user_id, partner_id)))
         
-        p_pref = user_data.get(partner_id, {'gender': 'Unknown', 'target': 'Both', 'lang': 'Hindi'})
-
-        # Match Conditions:
-        # 1. My target matches their gender OR I want 'Both'
-        # 2. Their target matches my gender OR they want 'Both'
-        cond1 = (my_pref['target'] == p_pref['gender'] or my_pref['target'] == 'Both')
-        cond2 = (p_pref['target'] == my_pref['gender'] or p_pref['target'] == 'Both')
-
-        if cond1 and cond2:
-            searching_users.remove(partner_id)
-            if user_id in searching_users: searching_users.remove(user_id)
-            
-            active_chats[user_id] = partner_id
-            active_chats[partner_id] = user_id
-            
-            await context.bot.send_message(chat_id=user_id, text="✅ Partner Found! Type to chat.")
-            await context.bot.send_message(chat_id=partner_id, text="✅ Partner Found! Type to chat.")
+        if game_id not in ttt_games: return
+        game = ttt_games[game_id]
+        
+        if game["turn"] != user_id:
+            await query.answer("Abhi aapki bari nahi hai!", show_alert=True)
             return
+        
+        idx = int(data.split("_")[1])
+        if game["board"][idx] != " ": return
 
-    if user_id not in searching_users:
-        searching_users.append(user_id)
-        await update.message.reply_text("🔎 Searching... please wait.")
+        symbol = "X" if game["X"] == user_id else "O"
+        game["board"][idx] = symbol
+        game["turn"] = partner_id
+        
+        winner = check_winner(game["board"])
+        if winner:
+            msg = f"Game Over! {'Draw' if winner == 'Draw' else winner + ' Jeet Gaya!'}"
+            await context.bot.send_message(chat_id=user_id, text=msg)
+            await context.bot.send_message(chat_id=partner_id, text=msg)
+            ttt_games.pop(game_id)
+        else:
+            await query.delete_message()
+            await send_ttt_board(context, user_id, game_id, "Move Saved. Partner ki bari...")
+            await send_ttt_board(context, partner_id, game_id, f"Aapki bari! ({'O' if symbol == 'X' else 'X'})")
 
-# --- SHARED FUNCTIONS ---
+# --- SETTINGS & SEARCH ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     kb = [['🚀 Find a partner'], ['⚙️ Settings', '🚫 Stop']]
-    await update.message.reply_text("👋 Welcome!", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
-
-async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    if user_id in active_chats:
-        p_id = active_chats.pop(user_id)
-        active_chats.pop(p_id, None)
-        await update.message.reply_text("🚫 Chat ended.")
-        await context.bot.send_message(chat_id=p_id, text="🚫 Partner left.")
-    elif user_id in searching_users:
-        searching_users.remove(user_id)
-        await update.message.reply_text("Stopped.")
+    await update.message.reply_text("👋 Welcome! Chat ke beech me <b>/game</b> likh kar Tic-Tac-Toe khelein.", 
+                                   reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True), parse_mode='HTML')
 
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     user_id = update.effective_user.id
-    if text == "🚀 Find a partner": await search(update, context)
-    elif text == "⚙️ Settings": await settings(update, context)
-    elif text == "🚫 Stop": await stop(update, context)
+    if text == "🚀 Find a partner":
+        if user_id in searching_users: return
+        searching_users.append(user_id)
+        await update.message.reply_text("🔎 Matching...")
+        # Matching logic
+        if len(searching_users) >= 2:
+            p1, p2 = searching_users.pop(0), searching_users.pop(0)
+            active_chats[p1], active_chats[p2] = p2, p1
+            await context.bot.send_message(chat_id=p1, text="✅ Connected! Type /game to play.")
+            await context.bot.send_message(chat_id=p2, text="✅ Connected! Type /game to play.")
+    elif text == "🚫 Stop":
+        if user_id in active_chats:
+            p_id = active_chats.pop(user_id)
+            active_chats.pop(p_id, None)
+            await update.message.reply_text("🚫 Chat ended.")
+            await context.bot.send_message(chat_id=p_id, text="🚫 Partner left.")
     elif user_id in active_chats:
-        try:
-            await context.bot.send_message(chat_id=active_chats[user_id], text=text)
-        except:
-            await stop(update, context)
+        await context.bot.send_message(chat_id=active_chats[user_id], text=text)
 
 if __name__ == '__main__':
     keep_alive()
     application = ApplicationBuilder().token(TOKEN).build()
     application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("game", start_ttt))
     application.add_handler(CallbackQueryHandler(button_handler))
     application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), message_handler))
     application.run_polling(drop_pending_updates=True)
