@@ -1,8 +1,16 @@
 import logging, os
 from flask import Flask
 from threading import Thread
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
-from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, MessageHandler, filters
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
+from telegram.ext import (
+    ApplicationBuilder, 
+    ContextTypes, 
+    CommandHandler, 
+    MessageHandler, 
+    filters, 
+    ConversationHandler, 
+    CallbackQueryHandler
+)
 
 # --- RENDER KEEP ALIVE ---
 app = Flask(__name__)
@@ -18,84 +26,114 @@ def keep_alive():
     t.daemon = True
     t.start()
 
-# --- BOT LOGIC ---
-TOKEN = '8565226350:AAEX2Om5xNMeuCOEqWNocUOpFGhjBWHFcck'
+# --- BOT STATES & LOGIC ---
+TOKEN = '8565226350:AAGor5G0jaCarsylmJJcjFne9htebRLv2bk'
 
-# Database
-user_data = {} # {id: {'age': '20', 'gender': 'M', 'target': 'F', 'place': 'Delhi'}}
+# States for Conversation
+GENDER, AGE, PLACE, TARGET = range(4)
+
+user_data = {} 
 searching_users = []
 active_chats = {}
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
+# --- START & SETTINGS ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     kb = [['/search', '/set'], ['/stop']]
     await update.message.reply_text(
-        "👋 Welcome! Pehle /set se apni profile banayein.\n\n"
-        "Example: `/set 22 M Delhi F` (Age Gender Place TargetGender)",
+        "👋 Welcome! Pehle /set button par click karke apni profile banayein.",
         reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True)
     )
 
-async def set_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    try:
-        # User input: /set 22 M Delhi F
-        args = context.args
-        if len(args) < 4:
-            await update.message.reply_text("❌ Galat format! Aise likhein:\n`/set 22 M Delhi F` \n(Yahan F ka matlab hai aapko Female se baat karni hai)")
-            return
-        
-        user_data[user_id] = {
-            'age': args[0],
-            'gender': args[1].upper(),
-            'place': args[2],
-            'target': args[3].upper()
-        }
-        await update.message.reply_text(f"✅ Profile Saved!\nAge: {args[0]}\nGender: {args[1]}\nPlace: {args[2]}\nTarget: {args[3]}\n\nAb /search karein!")
-    except Exception:
-        await update.message.reply_text("❌ Kuch galti hui. Check karein.")
+async def set_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [
+        [InlineKeyboardButton("Male 👤", callback_data="M"),
+         InlineKeyboardButton("Female 👩", callback_data="F")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text("Aapka Gender kya hai?", reply_markup=reply_markup)
+    return GENDER
 
+async def gender_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    context.user_data['gender'] = query.data
+    await query.edit_message_text("Apni Age (Umar) likhein: (e.g. 22)")
+    return AGE
+
+async def age_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data['age'] = update.message.text
+    await update.message.reply_text("Aap kahan se hain? (Shehar/Place ka naam likhein)")
+    return PLACE
+
+async def place_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data['place'] = update.message.text
+    keyboard = [
+        [InlineKeyboardButton("Male 👤", callback_data="M"),
+         InlineKeyboardButton("Female 👩", callback_data="F")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text("Aap kisse baat karna chahte hain? (Target Gender)", reply_markup=reply_markup)
+    return TARGET
+
+async def target_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    
+    user_data[user_id] = {
+        'gender': context.user_data['gender'],
+        'age': context.user_data['age'],
+        'place': context.user_data['place'],
+        'target': query.data
+    }
+    
+    profile_text = (
+        f"✅ Profile Saved!\n"
+        f"Gender: {user_data[user_id]['gender']}\n"
+        f"Age: {user_data[user_id]['age']}\n"
+        f"Place: {user_data[user_id]['place']}\n"
+        f"Talking to: {user_data[user_id]['target']}"
+    )
+    await query.edit_message_text(profile_text + "\n\nAb aap /search kar sakte hain!")
+    return ConversationHandler.END
+
+# --- SEARCH & CHAT LOGIC ---
 async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    
     if user_id in active_chats:
-        await update.message.reply_text("❌ Aap pehle se chat mein hain. /stop karein.")
+        await update.message.reply_text("❌ Aap pehle se chat mein hain.")
         return
-    
     if user_id not in user_data:
-        await update.message.reply_text("⚠️ Pehle profile set karein: `/set 22 M Delhi F`")
+        await update.message.reply_text("⚠️ Pehle /set se apni profile banayein.")
         return
 
     my_pref = user_data[user_id]
-
-    # Perfect Match dhundna
     for partner_id in searching_users:
         partner_pref = user_data.get(partner_id)
-        
-        # Gender Match Logic: Dono ki pasand ek dusre se milni chahiye
         if partner_pref and partner_pref['gender'] == my_pref['target'] and my_pref['gender'] == partner_pref['target']:
             searching_users.remove(partner_id)
             active_chats[user_id] = partner_id
             active_chats[partner_id] = user_id
-            
-            await context.bot.send_message(chat_id=user_id, text=f"✅ Match Mila!\nAge: {partner_pref['age']}\nFrom: {partner_pref['place']}\nSay Hello!")
-            await context.bot.send_message(chat_id=partner_id, text=f"✅ Match Mila!\nAge: {my_pref['age']}\nFrom: {my_pref['place']}\nSay Hello!")
+            await context.bot.send_message(chat_id=user_id, text=f"✅ Match Found! Age: {partner_pref['age']}, From: {partner_pref['place']}")
+            await context.bot.send_message(chat_id=partner_id, text=f"✅ Match Found! Age: {my_pref['age']}, From: {my_pref['place']}")
             return
 
     if user_id not in searching_users:
         searching_users.append(user_id)
-        await update.message.reply_text("🔎 Aapke liye perfect match dhoonda ja raha hai...")
+        await update.message.reply_text("🔎 Matching... please wait.")
 
 async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if user_id in active_chats:
         p_id = active_chats.pop(user_id)
         active_chats.pop(p_id, None)
-        await update.message.reply_text("🚫 Chat khatam.")
-        await context.bot.send_message(chat_id=p_id, text="🚫 Partner ne chat khatam kar di.")
+        await update.message.reply_text("🚫 Chat ended.")
+        await context.bot.send_message(chat_id=p_id, text="🚫 Partner left the chat.")
     elif user_id in searching_users:
         searching_users.remove(user_id)
-        await update.message.reply_text("Stopped searching.")
+        await update.message.reply_text("Stopped.")
 
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -104,14 +142,25 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 if __name__ == '__main__':
     keep_alive()
-    app_bot = ApplicationBuilder().token(TOKEN).build()
-    
-    app_bot.add_handler(CommandHandler("start", start))
-    app_bot.add_handler(CommandHandler("set", set_profile))
-    app_bot.add_handler(CommandHandler("search", search))
-    app_bot.add_handler(CommandHandler("stop", stop))
-    app_bot.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), message_handler))
-    
-    print("Bot starting with filters...")
-    app_bot.run_polling(drop_pending_updates=True)
-    
+    application = ApplicationBuilder().token(TOKEN).build()
+
+    # Settings Conversation Handler
+    set_handler = ConversationHandler(
+        entry_points=[CommandHandler('set', set_start)],
+        states={
+            GENDER: [CallbackQueryHandler(gender_choice)],
+            AGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, age_choice)],
+            PLACE: [MessageHandler(filters.TEXT & ~filters.COMMAND, place_choice)],
+            TARGET: [CallbackQueryHandler(target_choice)],
+        },
+        fallbacks=[CommandHandler('stop', stop)],
+    )
+
+    application.add_handler(set_handler)
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("search", search))
+    application.add_handler(CommandHandler("stop", stop))
+    application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), message_handler))
+
+    application.run_polling(drop_pending_updates=True)
+                              
