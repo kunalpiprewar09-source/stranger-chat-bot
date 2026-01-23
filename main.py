@@ -35,11 +35,7 @@ async def settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("👥 Partner Gender", callback_data="menu_target")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    text = (
-        "<b>Choose settings you would like to change:</b>\n\n"
-        "<i>Note: you will only be matched with users based on these preferences.</i>"
-    )
+    text = "<b>Choose settings you would like to change:</b>"
     
     if update.message:
         await update.message.reply_text(text, reply_markup=reply_markup, parse_mode='HTML')
@@ -50,77 +46,67 @@ async def settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user_id = query.from_user.id
-    if user_id not in user_data: user_data[user_id] = {'gender': 'N/A', 'age': 'N/A', 'lang': 'Hindi', 'target': 'Both'}
+    if user_id not in user_data: 
+        user_data[user_id] = {'gender': 'Both', 'age': 'Any', 'lang': 'Hindi', 'target': 'Both'}
     
     await query.answer()
     data = query.data
 
-    # Main Menu Options
     if data == "menu_gender":
-        kb = [[InlineKeyboardButton("Male 👦", callback_data="set_G_Male"), InlineKeyboardButton("Female 👧", callback_data="set_G_Female")]]
-        await query.edit_message_text("Aapka Gender kya hai?", reply_markup=InlineKeyboardMarkup(kb))
-    
-    elif data == "menu_age":
-        # Age selection buttons
-        kb = [
-            [InlineKeyboardButton("18-22", callback_data="set_A_18-22"), InlineKeyboardButton("23-27", callback_data="set_A_23-27")],
-            [InlineKeyboardButton("28-35", callback_data="set_A_28-35"), InlineKeyboardButton("35+", callback_data="set_A_35+")]
-        ]
-        await query.edit_message_text("Apni Age Range select karein:", reply_markup=InlineKeyboardMarkup(kb))
-
-    elif data == "menu_lang":
-        kb = [[InlineKeyboardButton("Hindi 🇮🇳", callback_data="set_L_Hindi"), InlineKeyboardButton("English 🇺🇸", callback_data="set_L_English")]]
-        await query.edit_message_text("Language select karein:", reply_markup=InlineKeyboardMarkup(kb))
-
+        kb = [[InlineKeyboardButton("Male", callback_data="set_G_Male"), InlineKeyboardButton("Female", callback_data="set_G_Female")]]
+        await query.edit_message_text("Aapka Gender:", reply_markup=InlineKeyboardMarkup(kb))
     elif data == "menu_target":
-        kb = [[InlineKeyboardButton("Males 👦", callback_data="set_T_Male"), InlineKeyboardButton("Females 👧", callback_data="set_T_Female")]]
-        await query.edit_message_text("Aap kisse baat karna chahte hain?", reply_markup=InlineKeyboardMarkup(kb))
-
-    # Saving Data
+        kb = [[InlineKeyboardButton("Males", callback_data="set_T_Male"), InlineKeyboardButton("Females", callback_data="set_T_Female"), InlineKeyboardButton("Both", callback_data="set_T_Both")]]
+        await query.edit_message_text("Kisse baat karni hai?", reply_markup=InlineKeyboardMarkup(kb))
     elif data.startswith("set_"):
-        parts = data.split("_") # e.g., ['set', 'G', 'Male']
-        category = parts[1]
-        value = parts[2]
+        parts = data.split("_")
+        user_data[user_id][parts[1] == 'G' and 'gender' or 'target' if parts[1] != 'A' else 'age'] = parts[2]
+        await query.edit_message_text(f"✅ Saved: {parts[2]}")
 
-        if category == 'G': user_data[user_id]['gender'] = value
-        if category == 'A': user_data[user_id]['age'] = value
-        if category == 'L': user_data[user_id]['lang'] = value
-        if category == 'T': user_data[user_id]['target'] = value
-
-        await query.edit_message_text(f"✅ Preference updated: {value}!\n\nUse /settings to change more.")
-
-# --- BASIC FUNCTIONS ---
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    kb = [['🚀 Find a partner'], ['⚙️ Settings', '🚫 Stop']]
-    await update.message.reply_text(
-        "👋 Welcome! Use <b>Settings</b> to set up your profile first.",
-        reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True),
-        parse_mode='HTML'
-    )
-
+# --- UPGRADED SEARCH LOGIC ---
 async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    if user_id in active_chats: return
-    
-    # Filter matching logic
-    my_pref = user_data.get(user_id, {'gender': 'N/A', 'target': 'Both', 'lang': 'Hindi'})
-    
-    for partner_id in searching_users:
-        p_pref = user_data.get(partner_id, {'gender': 'N/A', 'target': 'Both', 'lang': 'Hindi'})
+    if user_id in active_chats:
+        await update.message.reply_text("❌ Already in chat.")
+        return
+
+    # Default data if not set
+    if user_id not in user_data:
+        user_data[user_id] = {'gender': 'Unknown', 'target': 'Both', 'lang': 'Hindi'}
+
+    my_pref = user_data[user_id]
+
+    # Try matching with waiting users
+    for partner_id in searching_users[:]:
+        if partner_id == user_id: continue
         
-        # Simple Match: Language and Gender Target match
-        if my_pref['lang'] == p_pref['lang']:
-            if my_pref['target'] == p_pref['gender'] or my_pref['target'] == 'Both':
-                searching_users.remove(partner_id)
-                active_chats[user_id] = partner_id
-                active_chats[partner_id] = user_id
-                await context.bot.send_message(chat_id=user_id, text="✅ Partner Found! Say Hello.")
-                await context.bot.send_message(chat_id=partner_id, text="✅ Partner Found! Say Hello.")
-                return
+        p_pref = user_data.get(partner_id, {'gender': 'Unknown', 'target': 'Both', 'lang': 'Hindi'})
+
+        # Match Conditions:
+        # 1. My target matches their gender OR I want 'Both'
+        # 2. Their target matches my gender OR they want 'Both'
+        cond1 = (my_pref['target'] == p_pref['gender'] or my_pref['target'] == 'Both')
+        cond2 = (p_pref['target'] == my_pref['gender'] or p_pref['target'] == 'Both')
+
+        if cond1 and cond2:
+            searching_users.remove(partner_id)
+            if user_id in searching_users: searching_users.remove(user_id)
+            
+            active_chats[user_id] = partner_id
+            active_chats[partner_id] = user_id
+            
+            await context.bot.send_message(chat_id=user_id, text="✅ Partner Found! Type to chat.")
+            await context.bot.send_message(chat_id=partner_id, text="✅ Partner Found! Type to chat.")
+            return
 
     if user_id not in searching_users:
         searching_users.append(user_id)
-        await update.message.reply_text("🔎 Searching for a partner...")
+        await update.message.reply_text("🔎 Searching... please wait.")
+
+# --- SHARED FUNCTIONS ---
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    kb = [['🚀 Find a partner'], ['⚙️ Settings', '🚫 Stop']]
+    await update.message.reply_text("👋 Welcome!", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
 
 async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -128,32 +114,27 @@ async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
         p_id = active_chats.pop(user_id)
         active_chats.pop(p_id, None)
         await update.message.reply_text("🚫 Chat ended.")
-        await context.bot.send_message(chat_id=p_id, text="🚫 Your partner ended the chat.")
+        await context.bot.send_message(chat_id=p_id, text="🚫 Partner left.")
     elif user_id in searching_users:
         searching_users.remove(user_id)
-        await update.message.reply_text("Stopped searching.")
+        await update.message.reply_text("Stopped.")
 
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     user_id = update.effective_user.id
-    
-    if text == "🚀 Find a partner":
-        await search(update, context)
-    elif text == "⚙️ Settings":
-        await settings(update, context)
-    elif text == "🚫 Stop":
-        await stop(update, context)
+    if text == "🚀 Find a partner": await search(update, context)
+    elif text == "⚙️ Settings": await settings(update, context)
+    elif text == "🚫 Stop": await stop(update, context)
     elif user_id in active_chats:
-        await context.bot.send_message(chat_id=active_chats[user_id], text=text)
+        try:
+            await context.bot.send_message(chat_id=active_chats[user_id], text=text)
+        except:
+            await stop(update, context)
 
 if __name__ == '__main__':
     keep_alive()
     application = ApplicationBuilder().token(TOKEN).build()
-
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("settings", settings))
     application.add_handler(CallbackQueryHandler(button_handler))
     application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), message_handler))
-
     application.run_polling(drop_pending_updates=True)
-                   
