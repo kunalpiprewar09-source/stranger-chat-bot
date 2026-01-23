@@ -23,7 +23,7 @@ def keep_alive():
     t.start()
 
 # --- BOT LOGIC ---
-TOKEN = '8565226350:AAF97KTjahHDUuh89N9wmedklyWUflRD6UQ'
+TOKEN = '8565226350:AAEX2Om5xNMeuCOEqWNocUOpFGhjBWHFcck'
 
 searching_users = []
 active_chats = {}
@@ -79,4 +79,4 @@ if __name__ == '__main__':
     application.add_handler(CommandHandler("stop", stop))
     application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), message_handler))
     application.run_polling()
-        
+    
