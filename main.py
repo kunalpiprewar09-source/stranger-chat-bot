@@ -20,10 +20,9 @@ def keep_alive():
 
 # --- BOT CONFIG ---
 TOKEN = '8565226350:AAGor5G0jaCarsylmJJcjFne9htebRLv2bk'
-user_data = {} 
-active_chats = {}
+active_chats = {} # {user_id: partner_id}
 searching_users = []
-ttt_games = {} 
+ttt_games = {} # {game_id: game_data}
 
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 
@@ -40,22 +39,29 @@ async def start_ttt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     partner_id = active_chats.get(user_id)
     
-    if not partner_id:
-        await update.message.reply_text("❌ Pehle kisi se connect hon (/search).")
+    # Debugging check
+    if not partner_id or user_id not in active_chats:
+        await update.message.reply_text("❌ Error: Aap kisi se connect nahi hain. Pehle /search karein.")
         return
     
-    game_id = tuple(sorted((user_id, partner_id)))
-    ttt_games[game_id] = {"board": [" "] * 9, "turn": user_id, "X": user_id, "O": partner_id}
+    # Create unique game ID
+    game_id = f"{min(user_id, partner_id)}_{max(user_id, partner_id)}"
+    ttt_games[game_id] = {
+        "board": [" "] * 9, 
+        "turn": user_id, 
+        "X": user_id, 
+        "O": partner_id
+    }
     
-    # Dono ko board bhejein
-    await send_ttt_board(context, user_id, game_id, "🎮 Tic-Tac-Toe shuru! Aapki bari (X)")
-    await send_ttt_board(context, partner_id, game_id, "🎮 Partner ne game shuru kiya! Unki bari (X)")
+    await send_ttt_board(context, user_id, game_id, "🎮 Game Shuru! Aapki bari (X)")
+    await context.bot.send_message(chat_id=partner_id, text="🎮 Partner ne Tic-Tac-Toe shuru kiya hai!")
+    await send_ttt_board(context, partner_id, game_id, "Partner ki bari hai (X)")
 
 async def send_ttt_board(context, chat_id, game_id, text):
     board = ttt_games[game_id]["board"]
     kb = []
     for i in range(0, 9, 3):
-        row = [InlineKeyboardButton(board[i+j] if board[i+j] != " " else "⬜", callback_data=f"ttt_{i+j}") for j in range(3)]
+        row = [InlineKeyboardButton(board[i+j] if board[i+j] != " " else "⬜", callback_data=f"ttt_{game_id}_{i+j}") for j in range(3)]
         kb.append(row)
     await context.bot.send_message(chat_id=chat_id, text=text, reply_markup=InlineKeyboardMarkup(kb))
 
@@ -64,65 +70,64 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user_id = query.from_user.id
     data = query.data
+    await query.answer()
     
     if data.startswith("ttt_"):
-        partner_id = active_chats.get(user_id)
-        if not partner_id: 
-            await query.answer("Chat khatam ho chuki hai.")
-            return
-            
-        game_id = tuple(sorted((user_id, partner_id)))
-        if game_id not in ttt_games: 
-            await query.answer("Game purana ho gaya hai, naya shuru karein.")
+        parts = data.split("_") # ttt, game_id, index
+        game_id = parts[1]
+        idx = int(parts[2])
+        
+        if game_id not in ttt_games:
+            await query.edit_message_text("❌ Game khatam ya purana ho gaya hai.")
             return
             
         game = ttt_games[game_id]
+        partner_id = active_chats.get(user_id)
+
         if game["turn"] != user_id:
-            await query.answer("❌ Intezar karein, abhi aapki bari nahi hai!", show_alert=True)
+            await query.answer("❌ Abhi aapki bari nahi hai!", show_alert=True)
             return
         
-        idx = int(data.split("_")[1])
-        if game["board"][idx] != " ": 
-            await query.answer("Ye jagah pehle se bhari hai!")
-            return
+        if game["board"][idx] != " ": return
 
-        # Move update karein
+        # Update board
         symbol = "X" if game["X"] == user_id else "O"
         game["board"][idx] = symbol
         game["turn"] = partner_id
         
         winner = check_winner(game["board"])
         if winner:
-            result_msg = f"🏁 Game Over! {'Match Draw! 🤝' if winner == 'Draw' else winner + ' Jeet Gaya! 🎉'}"
-            await context.bot.send_message(chat_id=user_id, text=result_msg)
-            await context.bot.send_message(chat_id=partner_id, text=result_msg)
+            msg = "🏁 Match Draw! 🤝" if winner == "Draw" else f"🎉 {winner} Jeet Gaya!"
+            await context.bot.send_message(chat_id=user_id, text=msg)
+            await context.bot.send_message(chat_id=partner_id, text=msg)
             ttt_games.pop(game_id, None)
         else:
             await query.delete_message()
             await send_ttt_board(context, user_id, game_id, "✅ Move saved. Partner ki bari...")
             await send_ttt_board(context, partner_id, game_id, f"👉 Aapki bari! ({'O' if symbol == 'X' else 'X'})")
 
-# --- MAIN COMMANDS ---
+# --- CHAT & SEARCH ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    kb = [['🚀 Find a partner'], ['⚙️ Settings', '🚫 Stop']]
-    await update.message.reply_text("👋 Welcome! Chat shuru hone ke baad /game likhein.", 
-                                   reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
+    kb = [['🚀 Find a partner'], ['🚫 Stop']]
+    await update.message.reply_text("👋 Welcome! Connect hone ke baad /game likhein.", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
 
 async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text
     user_id = update.effective_user.id
     
     if text == "🚀 Find a partner":
+        if user_id in active_chats: return
         if user_id in searching_users:
-            await update.message.reply_text("⏳ Searching...")
+            await update.message.reply_text("🔎 Searching...")
             return
         searching_users.append(user_id)
         await update.message.reply_text("🔎 Partner dhoonda ja raha hai...")
+        
         if len(searching_users) >= 2:
             p1, p2 = searching_users.pop(0), searching_users.pop(0)
             active_chats[p1], active_chats[p2] = p2, p1
-            await context.bot.send_message(chat_id=p1, text="✅ Connected! Game ke liye /game likhein.")
-            await context.bot.send_message(chat_id=p2, text="✅ Connected! Game ke liye /game likhein.")
+            await context.bot.send_message(chat_id=p1, text="✅ Connected! /game se Tic-Tac-Toe khelein.")
+            await context.bot.send_message(chat_id=p2, text="✅ Connected! /game se Tic-Tac-Toe khelein.")
             
     elif text == "🚫 Stop":
         if user_id in active_chats:
@@ -140,11 +145,9 @@ async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 if __name__ == '__main__':
     keep_alive()
     application = ApplicationBuilder().token(TOKEN).build()
-    
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("game", start_ttt))
-    application.add_handler(CallbackQueryHandler(button_handler)) # Buttons ke liye zaroori
+    application.add_handler(CallbackQueryHandler(button_handler))
     application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), message_handler))
-    
     application.run_polling(drop_pending_updates=True)
-    
+        
