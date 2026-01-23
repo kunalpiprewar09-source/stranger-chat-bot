@@ -79,4 +79,19 @@ if __name__ == '__main__':
     application.add_handler(CommandHandler("stop", stop))
     application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), message_handler))
     application.run_polling()
+    if __name__ == '__main__':
+    keep_alive() # Flask server
+    
+    application = ApplicationBuilder().token(TOKEN).build()
+    
+    # Saare handlers yahan add karein (start, search, stop, etc.)
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("search", search))
+    application.add_handler(CommandHandler("stop", stop))
+    application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), message_handler))
+    
+    print("Bot is starting on Render...")
+    
+    # drop_pending_updates=True lagane se purane saare conflicts khatam ho jayenge
+    application.run_polling(drop_pending_updates=True)
     
